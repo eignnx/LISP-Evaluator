@@ -20,39 +20,20 @@
 #define HERE() \
     fprintf(stderr, "[%s::%s:%d] GOT HERE\n", __FILE__, __FUNCTION__, __LINE__)
 
-#define value_downcast(value, TYPE, KIND)                                          \
-    (((value) == NULL)                                                             \
-        ? panic("Expected %s, got null!", #TYPE), (TYPE*) NULL :                   \
-    (((value)->kind != KIND)                                                       \
-        ? panic("Expected %s, got %s!", #TYPE, typename_of(value)), (TYPE*) NULL : \
-    ((TYPE*) (value))))
-
-#define nullable_value_downcast(value, TYPE, KIND)                                 \
-    (((value) != NULL && (value)->kind != KIND)                                    \
-        ? panic("Expected %s, got %s!", #TYPE, typename_of(value)), (TYPE*) NULL : \
-    ((TYPE*) (value)))
-
-#define builtin_procedure_definition(NAME, IDENT, ...) \
-    Value* IDENT##__builtin(List* args) {              \
-        __VA_ARGS__                                    \
-    }                                                  \
-    static BuiltinProc IDENT = {                       \
-        .value=(Value) { .kind=BUILTIN_PROCEDURE },    \
-        .name=NAME,                                    \
-        .fn=IDENT##__builtin                           \
-    }
-
-#define special_form_definition(NAME, IDENT, ...)        \
-    Value* IDENT##__special_form(List* args, Env* env) { \
-        __VA_ARGS__                                      \
-    }                                                    \
-    static SpecialForm IDENT = {                         \
-        .value=(Value) { .kind=SPECIAL_FORM },           \
-        .name=NAME,                                      \
-        .fn=IDENT##__special_form                        \
-    }
+#define DBG_REF(R) \
+    fprintf(stderr, "[%s::%s:%d] %s == %#lx\n", __FILE__, __FUNCTION__, __LINE__, #R, R)
 
 #define str_eq(a, b) \
     (a == b || strcmp(a, b) == 0)
+
+#define ASSERT_VALUE_REFS_EQ(A, B) \
+    ((!value_eq(A, B)) ? \
+        fprintf(stderr, "panic[%s::%s:%d] ASSERTION FAILURE: ",       \
+                __FILE__, __FUNCTION__, __LINE__), \
+        print_value(stderr, A), \
+        fprintf(stderr, " != "), \
+        println_value(stderr, B), \
+        exit(1) \
+    : 1 )
 
 #endif

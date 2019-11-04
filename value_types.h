@@ -2,13 +2,13 @@
 #define VALUE_TYPES_H
 
 #include <stdlib.h> // malloc
-#include <stdint.h> // int64_t
+#include <stdint.h> // uint64_t
 
 // Forward declaration. See `./env_type.h` for impl.
 typedef struct Env Env;
 
 
-typedef void* Value;
+typedef uint64_t ValueRef;
 
 typedef uint64_t Idx;
 
@@ -26,9 +26,9 @@ enum VALUE_KIND {
 };
 
 #define VALUE_KIND_MASK (~0UL << (64 - VALUE_KIND_BITS))
-#define VALUE_DATA_MASK (~0UL << VALUE_KIND_BITS)
+#define VALUE_DATA_MASK (~0UL >> VALUE_KIND_BITS)
 
-#define GET_VALUE_KIND(ptr) ((VALUE_KIND_MASK & (ptr)) >> (64 - VALUE_KIND_BITS))
+#define GET_VALUE_KIND(ptr) ((unsigned) ((VALUE_KIND_MASK & (ptr)) >> (64 - VALUE_KIND_BITS)))
 #define GET_VALUE_DATA(ptr) ((Idx) (VALUE_DATA_MASK & (ptr)))
 
 #define is_null(value) ((value) == 0UL)
@@ -40,60 +40,61 @@ enum VALUE_KIND {
 #define is_special_form(value) (GET_VALUE_KIND(value) == SPECIAL_FORM)
 #define is_other_value(value) (GET_VALUE_KIND(value) == OTHER_VALUE)
 
-#define MAKE_VALUE(kind, data)            \
-    (((kind) << (64 - VALUE_KIND_BITS))   \
-    | (VALUE_DATA_MASK & (data)))
+#define MAKE_VALUE(kind, data) \
+    ((((uint64_t) kind) << (64 - VALUE_KIND_BITS)) | (VALUE_DATA_MASK & (data)))
 
-typedef struct Number {
-    int64_t num;
-} Number;
+typedef ValueRef Number;
 
-typedef Value SymbolRef;
+typedef ValueRef SymbolRef;
 typedef struct Symbol {
     char* str;
 } Symbol;
 
-/// NOTE: '() == NULL is not a Pair! Use List instead.
-typedef Value PairRef;
+/// NOTE: '() == NULL is not a Pair! Use ListRef instead.
+typedef ValueRef PairRef;
 
-// Semantically, a List can be NULL, while a Pair should never be NULL.
-typedef Pair List;
+// Semantically, a ListRef can be NULL, while a Pair should never be NULL.
+typedef PairRef ListRef;
+typedef struct Pair {
+    ValueRef car;
+    ValueRef cdr;
+} Pair;
 
-typedef Value BigValueRef;
+typedef ValueRef BigValueRef;
 typedef struct BigValue {
-    Value v1;
-    Value v2;
-    Value v3;
+    ValueRef v1;
+    ValueRef v2;
+    ValueRef v3;
 } BigValue;
 
-typedef Value ProcRef;
+typedef ValueRef ProcRef;
 typedef struct Proc {
     Env* creation_env;
     PairRef params;
-    Value body;
+    ValueRef body;
 } Proc;
 
-typedef Value (*BuiltinFnPtr)(List args);
-typedef Value BuiltinProcRef;
+typedef ValueRef (*BuiltinFnPtr)(ListRef args);
+typedef ValueRef BuiltinProcRef;
 typedef struct BuiltinProc {
-    const char* name;
+    char* name;
     BuiltinFnPtr fn;
 } BuiltinProc;
 
-typedef Value (*SpecialFormFnPtr)(List args, Env* env);
-typedef Value SpecialFormRef;
+typedef ValueRef (*SpecialFormFnPtr)(ListRef args, Env* env);
+typedef ValueRef SpecialFormRef;
 typedef struct SpecialForm {
-    const char* name;
+    char* name;
     SpecialFormFnPtr fn;
 } SpecialForm;
 
 ////////////////////ALLOCATION POOLS////////////////
-#define MAX_ALLOC_SIZE (1 << (64 - VALUE_TAG_BITS))
+#define MAX_ALLOC_SIZE (1UL << (64 - VALUE_KIND_BITS))
 #define ALLOC_SIZE (MAX_ALLOC_SIZE >> 40) // dont use up all of memory
 
 static struct {
-    Value cars[ALLOC_SIZE];
-    Value cdrs[ALLOC_SIZE];
+    ValueRef cars[ALLOC_SIZE];
+    ValueRef cdrs[ALLOC_SIZE];
     Idx next_idx;
 } PAIRS = {
     .next_idx=0UL
@@ -107,34 +108,34 @@ static struct {
 };
 
 static struct {
-    Value v1[ALLOC_SIZE];
-    Value v2[ALLOC_SIZE];
-    Value v3[ALLOC_SIZE];
+    ValueRef v1[ALLOC_SIZE];
+    ValueRef v2[ALLOC_SIZE];
+    ValueRef v3[ALLOC_SIZE];
     Idx next_idx;
 } BIG_VALUES = {
     .next_idx=0UL
 };
 ////////////////////////////////////////////////////
 
-Value car_lookup(PairRef pair) {
+ValueRef car_lookup(PairRef pair) {
     Idx idx = GET_VALUE_DATA(pair);
     if (idx < PAIRS.next_idx) {
         return PAIRS.cars[idx];
     } else {
-        panic("Car index '%ld' out of bounds!", idx);
+        panic("Car index '%lu' out of bounds!", idx);
     }
 }
 
-Value cdr_lookup(PairRef pair) {
+ValueRef cdr_lookup(PairRef pair) {
     Idx idx = GET_VALUE_DATA(pair);
     if (idx < PAIRS.next_idx) {
         return PAIRS.cdrs[idx];
     } else {
-        panic("Cdr index '%ld' out of bounds!", idx);
+        panic("Cdr index '%lu' out of bounds!", idx);
     }
 }
 
-PairRef make_pair_ref(Value car, Value cdr) {
+PairRef make_pair_ref(ValueRef car, ValueRef cdr) {
     Idx idx = PAIRS.next_idx++;
     if (idx > ALLOC_SIZE) panic("%s", "PAIRS alloc error!");
     PAIRS.cars[idx] = car;
@@ -157,13 +158,13 @@ SymbolRef make_symbol_ref(char* str) {
 
 Symbol symbol_lookup(SymbolRef sym) {
     Idx idx = GET_VALUE_DATA(sym);
-    if (idx >= SYMBOLS.next_idx) panic("Symbol index '%ld' out of bounds!", idx);
+    if (idx >= SYMBOLS.next_idx) panic("Symbol index '%lu' out of bounds!", idx);
     return SYMBOLS.symbols[idx];
 }
 
 BigValue big_value_lookup(BigValueRef val) {
     Idx idx = GET_VALUE_DATA(val);
-    if (idx >= BIG_VALUES.next_idx) panic("Big value index '%ld' out of bounds!", idx);
+    if (idx >= BIG_VALUES.next_idx) panic("Big value index '%lu' out of bounds!", idx);
     return (BigValue) {
         .v1=BIG_VALUES.v1[idx],
         .v2=BIG_VALUES.v2[idx],
@@ -171,9 +172,9 @@ BigValue big_value_lookup(BigValueRef val) {
     };
 }
 
-const char* typename_of(Value value) {
-    if (value == NULL) return "null";
+const char* typename_of(ValueRef value) {
     switch (GET_VALUE_KIND(value)) {
+    case NULL_LIST: return "null";
     case NUMBER: return "number";
     case SYMBOL: return "symbol";
     case PAIR: return "pair";
@@ -184,7 +185,7 @@ const char* typename_of(Value value) {
     }
 }
 
-#define SYM(s) ((Value) make_symbol_ref(s))
+#define SYM(s) ((ValueRef) make_symbol_ref(s))
 
 bool symbol_eq(const SymbolRef a, const SymbolRef b) {
     return a == b;
@@ -196,16 +197,16 @@ char* symbol_to_string(const SymbolRef sym) {
 
 // TODO: check that it's within bounds!
 Number make_number(int64_t num) {
-    MAKE_VALUE(NUMBER, num);
+    return MAKE_VALUE(NUMBER, num);
 }
 
-#define NUM(n) ((Value) make_number(n))
+#define NUM(n) ((ValueRef) make_number(n))
 
 
-#define CONS(x, y) ((Value) make_pair_ref(x, y))
+#define CONS(x, y) ((ValueRef) make_pair_ref(x, y))
 
-Value make_list(Value values[], size_t count) {
-    Value list = NULL;
+ValueRef make_list(ValueRef values[], size_t count) {
+    ValueRef list = (ValueRef) NULL;
     for (int i = count-1; i >= 0; i--) {
         list = make_pair_ref(values[i], list);
     }
@@ -214,22 +215,22 @@ Value make_list(Value values[], size_t count) {
 
 #define LIST(...)                                          \
     make_list(                                             \
-        (Value[]) { __VA_ARGS__ },                         \
-        sizeof((Value[]) { __VA_ARGS__ }) / sizeof(Value)  \
+        (ValueRef[]) { __VA_ARGS__ },                         \
+        sizeof((ValueRef[]) { __VA_ARGS__ }) / sizeof(ValueRef)  \
     )
 
-bool value_eq(Value, Value);
+bool value_eq(ValueRef, ValueRef);
 
 /// Expects non-null arguments.
-bool pair_eq(Pair* a, Pair* b) {
-    return value_eq(a->car, b->car) && value_eq(a->cdr, b->cdr);
+bool pair_eq(PairRef a, PairRef b) {
+    return value_eq(car_lookup(a), car_lookup(b)) && value_eq(cdr_lookup(a), cdr_lookup(b));
 }
 
-bool value_eq(Value a, Value b) {
-    if (a == NULL && b == NULL) return true;
-    else if (a == NULL || b == NULL) return false;
-    if (a->kind != b->kind) return false;
-    switch (a->kind) {
+bool value_eq(ValueRef a, ValueRef b) {
+    if (is_null(a) && is_null(b)) return true;
+    else if (is_null(a) || is_null(b)) return false;
+    if (GET_VALUE_KIND(a) != GET_VALUE_KIND(b)) return false;
+    switch (GET_VALUE_KIND(a)) {
     case SYMBOL: {
         return symbol_eq((SymbolRef) a, (SymbolRef) b);
     }
@@ -246,29 +247,29 @@ bool value_eq(Value a, Value b) {
     }
 }
 
-void proc_lookup(ProcRef proc) {
+Proc proc_lookup(ProcRef proc) {
     BigValue bv = big_value_lookup((BigValueRef) proc);
     return (Proc) {
         .creation_env = (Env*) bv.v1,
         .params = (PairRef) bv.v2,
-        .body = (Value) bv.v3,
+        .body = (ValueRef) bv.v3,
     };
 }
 
-ProcRef make_proc(Env* creation_env, PairRef params, Value body) {
+ProcRef make_proc(Env* creation_env, PairRef params, ValueRef body) {
     Idx idx = BIG_VALUES.next_idx++;
     if (idx >= ALLOC_SIZE) panic("%s", "BIG_VALUES alloc overflow!");
-    BIG_VALUES.v1[idx] = (Value) creation_env;
-    BIG_VALUES.v2[idx] = (Value) params;
-    BIG_VALUES.v3[idx] = (Value) body;
+    BIG_VALUES.v1[idx] = (ValueRef) creation_env;
+    BIG_VALUES.v2[idx] = (ValueRef) params;
+    BIG_VALUES.v3[idx] = (ValueRef) body;
     return MAKE_VALUE(PROCEDURE, idx);
 }
 
-#define PROC(env, formals, body) ((Value) make_proc(env, formals, body))
+#define PROC(env, formals, body) ((ValueRef) make_proc(env, formals, body))
 
 Pair pair_lookup(PairRef pair) {
     Idx idx = GET_VALUE_DATA(pair);
-    if (idx >= PAIRS.next_idx) panic("Pair idx '%ld' out of bounds!", idx);
+    if (idx >= PAIRS.next_idx) panic("Pair idx '%lu' out of bounds!", idx);
     return (Pair) {
         .car=PAIRS.cars[idx],
         .cdr=PAIRS.cdrs[idx],
@@ -286,8 +287,8 @@ BuiltinProc builtin_proc_lookup(BuiltinProcRef proc) {
 BuiltinProcRef make_builtin_proc(const char* name, BuiltinFnPtr fn) {
     Idx idx = PAIRS.next_idx++;
     if (idx >= ALLOC_SIZE) panic("%s", "PAIRS alloc overflow");
-    PAIRS.cars[idx] = (Value) name;
-    PAIRS.cdrs[idx] = (Value) fn;
+    PAIRS.cars[idx] = (ValueRef) name;
+    PAIRS.cdrs[idx] = (ValueRef) fn;
     return MAKE_VALUE(BUILTIN_PROCEDURE, idx);
 }
 
@@ -302,31 +303,42 @@ SpecialForm special_form_lookup(SpecialFormRef form) {
 SpecialFormRef make_special_form(char* name, SpecialFormFnPtr fn) {
     Idx idx = PAIRS.next_idx++;
     if (idx >= ALLOC_SIZE) panic("%s", "PAIRS alloc overflow");
-    PAIRS.cars[idx] = (Value) name;
-    PAIRS.cdrs[idx] = (Value) fn;
+    PAIRS.cars[idx] = (ValueRef) name;
+    PAIRS.cdrs[idx] = (ValueRef) fn;
     return MAKE_VALUE(SPECIAL_FORM, idx);
 }
 
+/////////////////////////////////// ASSUME /////////////////////////////////////////////
+#define value_downcast(value, TYPE, KIND)                                        \
+    ((GET_VALUE_KIND(value) != KIND)                                             \
+        ? panic("Expected %s, got %s!", #TYPE, typename_of(value)), (TYPE) NULL \
+        : ((TYPE) (value)))
 
-////////////////////////// ASSUME /////////////////////////////////////////
+#define nullable_value_downcast(value, TYPE, KIND)                              \
+    ((!is_null(value) && GET_VALUE_KIND(value) != KIND)                         \
+        ? panic("Expected %s, got %s!", #TYPE, typename_of(value)), (TYPE) NULL \
+        : ((TYPE) (value)))
+
+//==============================================================================
+
 #define assume_number(value) value_downcast(value, Number, NUMBER)
-#define assume_symbol(value) value_downcast(value, Symbol, SYMBOL)
-#define assume_pair(value) value_downcast(value, Pair, PAIR)
-#define assume_list(value) nullable_value_downcast(value, List, PAIR)
-#define assume_proc(value) value_downcast(value, Proc, PROCEDURE)
-#define assume_builtinproc(value) value_downcast(value, BuiltinProc, BUILTIN_PROCEDURE)
-#define assume_specialform(value) value_downcast(value, SpecialForm, SPECIAL_FORM)
-//////////////////////////////////////////////////////////////////////////
+#define assume_symbol_ref(value) value_downcast(value, SymbolRef, SYMBOL)
+#define assume_pair_ref(value) value_downcast(value, PairRef, PAIR)
+#define assume_list(value) nullable_value_downcast(value, ListRef, PAIR)
+#define assume_proc_ref(value) value_downcast(value, ProcRef, PROCEDURE)
+#define assume_builtinproc_ref(value) value_downcast(value, BuiltinProcRef, BUILTIN_PROCEDURE)
+#define assume_specialform_ref(value) value_downcast(value, SpecialFormRef, SPECIAL_FORM)
+/////////////////////////////////////////////////////////////////////////////////////////
 
 /////////////////////////// PRINTING ///////////////////////////////////
-void print_value(FILE*, const Value);
+void print_value(FILE*, const ValueRef);
 
 /// Assumes non-null pair pointer.
 void print_pair(FILE* out, const PairRef pair) {
     fprintf(out, "(");
-    Value cdr;
+    ValueRef cdr;
     for (
-        cdr = (Value) pair;
+        cdr = (ValueRef) pair;
         is_pair(cdr);
         cdr = cdr_lookup((PairRef) cdr)
     ) {
@@ -339,7 +351,7 @@ void print_pair(FILE* out, const PairRef pair) {
         }
     }
 
-    if (cdr == NULL) {
+    if (is_null(cdr)) {
         fputc(')', out);
     } else {
         fprintf(out, ". ");
@@ -348,13 +360,13 @@ void print_pair(FILE* out, const PairRef pair) {
     }
 }
 
-void print_value(FILE* out, Value value) {
+void print_value(FILE* out, ValueRef value) {
     switch (GET_VALUE_KIND(value)) {
     case NULL_LIST:
         fprintf(out, "%s", "'()");
         break;
     case NUMBER:
-        fprintf(out, "%ld", GET_VALUE_DATA(value));
+        fprintf(out, "%lu", GET_VALUE_DATA(value));
         break;
     case SYMBOL:
         fprintf(out, "%s", symbol_to_string((SymbolRef) value));
@@ -364,7 +376,7 @@ void print_value(FILE* out, Value value) {
         break;
     case PROCEDURE:
         // Print the index.
-        fprintf(out, "<procedure[%ld]>", GET_VALUE_DATA(value));
+        fprintf(out, "<procedure[%lu]>", GET_VALUE_DATA(value));
         break;
     case BUILTIN_PROCEDURE:
         fprintf(out, "<builtin-procedure[%s]>", builtin_proc_lookup(value).name);
@@ -373,11 +385,11 @@ void print_value(FILE* out, Value value) {
         fprintf(out, "<special-form[%s]>", special_form_lookup(value).name);
         break;
     default:
-        panic("`print_value` is not implemented for value kind: %d", GET_VALUE_KIND(value));
+        panic("`print_value` is not implemented for value kind: %u", GET_VALUE_KIND(value));
     }
 }
 
-void println_value(FILE* out, Value value) {
+void println_value(FILE* out, ValueRef value) {
     print_value(out, value);
     fputc('\n', out);
 }

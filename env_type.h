@@ -6,11 +6,11 @@
 
 typedef struct Env {
     struct Env* parent;
-    Symbol* symbol;
-    Value* value;
+    SymbolRef symbol;
+    ValueRef value;
 } Env;
 
-Env* env_find(Env* env, Symbol* symbol) {
+Env* env_find(Env* env, SymbolRef symbol) {
     for (; env != NULL; env = env->parent) {
         if (symbol_eq(env->symbol, symbol))
             return env;
@@ -18,7 +18,7 @@ Env* env_find(Env* env, Symbol* symbol) {
     panic("Unbound Symbol: `%s`", symbol_to_string(symbol));
 }
 
-Value* env_lookup(Env* env, Symbol* symbol) {
+ValueRef env_lookup(Env* env, SymbolRef symbol) {
     return env_find(env, symbol)->value;
 }
 
@@ -32,7 +32,7 @@ void print_env(FILE* out, const Env* env) {
     fprintf(out, "}\n");
 }
 
-Env* make_env(Env* const parent, Symbol* const symbol, Value* const value) {
+Env* make_env(Env* const parent, SymbolRef symbol, ValueRef value) {
     Env* env = malloc(sizeof(env));
     env->parent = parent;
     env->symbol = symbol;
